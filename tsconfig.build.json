@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": false,
+    "noUnusedLocals": true,
+    "outDir": "./dist",
+    "removeComments": true,
+    "sourceMap": false
+  },
+  "exclude": [
+    "src/__fixtures__",
+    "**/*.fixture.ts",
+    "**/*.integration.ts",
+    "**/*.test.ts",
+    "**/*.snap"
+  ]
+}

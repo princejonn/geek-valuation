@@ -1,0 +1,67 @@
+# Build
+tsconfig.build.tsbuildinfo
+
+# Default
+.DS_Store
+Thumbs.db
+
+# Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Environment
+.env
+.env.development.local
+.env.local
+.env.production.local
+.env.test.local
+
+# Folders
+.certs
+.claude
+.data
+.jest
+.tmp
+dist
+node_modules
+tmp
+
+# IDEs and editors
+.c9
+.classpath
+.idea
+.project
+.settings
+*.launch
+*.sublime-workspace
+
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Logs
+*.log
+logs
+lerna-debug.log*
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# NPM
+.npmrc
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Test
+*.db
+
+# Domain
+collection.csv
+valuation.csv
