@@ -33,12 +33,12 @@
     "format": "prettier . --write",
     "lint": "eslint . --ext .ts --fix",
     "prepare": "husky",
-    "prepublishOnly": "npm run format && npm run lint && npm run test && npm run build",
+    "prepublishOnly": "tsc --noEmit && prettier . --check && eslint . --ext .ts && jest && npm run build",
     "start": "ts-node src/main.ts",
     "test": "jest",
     "typecheck": "tsc --watch",
     "update": "ncu -i",
-    "verify": "tsc && npm run format && npm run lint && npm run test"
+    "verify": "tsc --noEmit && prettier . --check && eslint . --ext .ts && jest"
   },
   "dependencies": {
     "commander": "^14.0.2",
