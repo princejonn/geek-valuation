@@ -1,6 +1,6 @@
 {
   "name": "geek-valuation",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A command-line tool for scraping historical sale prices from BoardGameGeek's marketplace and generating valuation reports for your board game collection.",
   "license": "MIT",
   "author": "Jonn Nilsson",
