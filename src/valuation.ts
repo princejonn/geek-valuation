@@ -13,12 +13,18 @@
  * At valuation time, values are converted to the user's target currency
  * (default: SEK) using current exchange rates.
  *
+ * ## Condition Determination
+ *
+ * The condition for each game is determined in priority order:
+ * 1. **conditiontext from CSV** - If it matches a standard BGG condition
+ * 2. **--condition flag** - Global fallback condition from CLI
+ * 3. **numplays inference** - Infer from play count (0 plays = New, etc.)
+ * 4. **Default** - Falls back to Like New if nothing else works
+ *
  * ## Valuation Strategy
  *
- * We prioritize "New" condition because:
- * - Sealed/unpunched games command premium prices
- * - Provides the highest defensible valuation (e.g., for insurance)
- * - Falls back to "Like New" if no "New" sales exist
+ * Once condition is determined, we look for market data matching that condition.
+ * If no exact match exists, we fall back through the condition priority order.
  *
  * ### Multi-Factor Weighted Valuation
  *
@@ -32,9 +38,8 @@
  *    - Gaussian decay from median based on IQR distance
  *    - At median: 1.0, 2 IQR away: ~0.14, 3 IQR away: ~0.01
  *
- * 3. **Currency weighting**: European currencies preferred
- *    - SEK, EUR, DKK, NOK, GBP, CHF, etc.: weight 1.0
- *    - USD, CAD, AUD, etc.: weight 0.3 (when EU data exists)
+ * 3. **Currency weighting**: Regional currencies preferred
+ *    - Configurable by region (default: Europe)
  *
  * Combined: `weight = timeWeight × priceWeight × currencyWeight`
  *
@@ -50,11 +55,8 @@
  * - `name`: Game name
  * - `purchasePrice{CUR}`: What you paid (converted to target currency)
  * - `estimatedValue{CUR}`: Current market value estimate
- * - `source`: How the estimate was determined:
- *   - `market:new`: From New condition weighted mean
- *   - `market:like-new`: From Like New weighted mean
- *   - `market:other`: From other conditions weighted mean
- *   - `fallback`: No market data, using 60% of purchase price
+ * - `condition`: The condition used for valuation
+ * - `source`: How the estimate was determined
  *
  * ## Collection Summary
  *
@@ -63,8 +65,16 @@
  */
 
 import * as fs from "fs";
+import {
+  Condition,
+  CONDITION_PRIORITY,
+  DEFAULT_CONDITION,
+  inferConditionFromPlays,
+  NO_MARKET_DATA_FALLBACK_MULTIPLIER,
+  parseConditionText,
+} from "./constants";
 import { convertFromBase, loadExchangeRates } from "./currency";
-import { ExchangeRates, GameResult } from "./types";
+import { ConditionStats, ExchangeRates, GameResult } from "./types";
 
 /**
  * Options for the valuation command.
@@ -81,18 +91,103 @@ export interface ValuationOptions {
 
   /** Target currency for the valuation report (default: SEK) */
   targetCurrency?: string;
+
+  /**
+   * Default condition to use when conditiontext is not provided.
+   * If not set, condition will be inferred from numplays.
+   */
+  defaultCondition?: Condition;
+}
+
+/**
+ * Determines the condition to use for a game's valuation.
+ *
+ * Priority:
+ * 1. conditiontext from CSV (if it matches a standard condition)
+ * 2. defaultCondition from CLI flag
+ * 3. Inferred from numplays
+ * 4. Ultimate fallback: DEFAULT_CONDITION
+ *
+ * @param game - The game to determine condition for
+ * @param defaultCondition - Optional default from CLI flag
+ * @returns The condition to use for valuation
+ */
+function determineCondition(
+  game: GameResult,
+  defaultCondition?: Condition,
+): Condition {
+  // 1. Try to parse conditiontext from CSV
+  const parsedCondition = parseConditionText(game.conditiontext);
+  if (parsedCondition) {
+    return parsedCondition;
+  }
+
+  // 2. Use CLI default if provided
+  if (defaultCondition) {
+    return defaultCondition;
+  }
+
+  // 3. Infer from numplays
+  if (game.numplays !== undefined) {
+    return inferConditionFromPlays(game.numplays);
+  }
+
+  // 4. Ultimate fallback
+  return DEFAULT_CONDITION;
+}
+
+/**
+ * Finds the best matching calc entry for a condition.
+ *
+ * If the exact condition doesn't exist in calc, falls back through
+ * the condition priority order until a match is found.
+ *
+ * @param calc - Array of condition statistics
+ * @param targetCondition - The condition we're looking for
+ * @returns The matching ConditionStats and the condition it matched, or null
+ */
+function findCalcForCondition(
+  calc: ConditionStats[],
+  targetCondition: Condition,
+): { stats: ConditionStats; matchedCondition: Condition } | null {
+  if (calc.length === 0) {
+    return null;
+  }
+
+  // Try exact match first (compare as strings since calc.condition is string)
+  const exactMatch = calc.find(
+    (c) => c.condition === (targetCondition as string),
+  );
+  if (exactMatch) {
+    return { stats: exactMatch, matchedCondition: targetCondition };
+  }
+
+  // Fall back through priority order
+  for (const condition of CONDITION_PRIORITY) {
+    const match = calc.find((c) => c.condition === (condition as string));
+    if (match) {
+      return { stats: match, matchedCondition: condition };
+    }
+  }
+
+  // No match found in priority order, return first available
+  return {
+    stats: calc[0],
+    matchedCondition: calc[0].condition as Condition,
+  };
 }
 
 /**
  * Generates a valuation CSV from scraped price data.
  *
  * The estimated value uses the multi-factor `weightedMean` which incorporates
- * time, price, and currency weighting. Condition priority: New > Like New > Other.
+ * time, price, and currency weighting. Condition is determined per-game based
+ * on conditiontext, CLI flag, or numplays inference.
  *
  * Values in prices.json are stored in USD and converted to the target currency
  * (default: SEK) at valuation time.
  *
- * @param options - Input and output file paths, target currency
+ * @param options - Input and output file paths, target currency, default condition
  */
 export async function generateValuationCsv(
   options: ValuationOptions,
@@ -100,6 +195,7 @@ export async function generateValuationCsv(
   const pricesPath = options.input;
   const outputCsvPath = options.output;
   const targetCurrency = options.targetCurrency || "SEK";
+  const defaultCondition = options.defaultCondition;
 
   if (!fs.existsSync(pricesPath)) {
     console.error(`Error: prices.json not found at ${pricesPath}`);
@@ -121,6 +217,12 @@ export async function generateValuationCsv(
   const content = fs.readFileSync(pricesPath, "utf-8");
   const games: GameResult[] = JSON.parse(content);
 
+  if (defaultCondition) {
+    console.log(`Default condition: ${defaultCondition}`);
+  } else {
+    console.log(`Condition: per-game (from CSV or inferred from plays)`);
+  }
+
   console.log(
     `Generating valuation CSV from ${games.length} games (currency: ${targetCurrency})...`,
   );
@@ -128,13 +230,16 @@ export async function generateValuationCsv(
   // Build CSV content with dynamic column headers based on target currency
   const csvLines: string[] = [];
   csvLines.push(
-    `name,purchasePrice${targetCurrency},estimatedValue${targetCurrency},source`,
+    `name,purchasePrice${targetCurrency},estimatedValue${targetCurrency},condition,source`,
   );
 
   let gamesWithPrices = 0;
   let gamesWithFallback = 0;
   let totalPurchasePrice = 0;
   let totalEstimatedValue = 0;
+
+  // Track condition usage for summary
+  const conditionCounts: Record<string, number> = {};
 
   for (const game of games) {
     // Convert purchase price from USD to target currency
@@ -145,42 +250,42 @@ export async function generateValuationCsv(
       rates,
     );
 
+    // Determine the condition for this game
+    const gameCondition = determineCondition(game, defaultCondition);
+    conditionCounts[gameCondition] = (conditionCounts[gameCondition] || 0) + 1;
+
     let estimatedValueUSD: number;
     let source: string;
+    let usedCondition: string = gameCondition;
 
     if (game.prices.length > 0 && game.calc.length > 0) {
-      // We have market data - use weightedMean for valuation (stored in USD)
+      // We have market data - find the best match for our condition
+      const match = findCalcForCondition(game.calc, gameCondition);
 
-      // Prioritize "New" condition (sealed games command premium prices)
-      // Fall back to "Like New" if no "New" sales exist
-      const newCondition = game.calc.find((s) => s.condition === "New");
-      const likeNew = game.calc.find((s) => s.condition === "Like New");
-      const preferredCondition = newCondition || likeNew;
+      if (match) {
+        estimatedValueUSD = match.stats.weightedMean ?? 0;
+        usedCondition = match.matchedCondition;
 
-      if (preferredCondition) {
-        const conditionLabel = newCondition ? "new" : "like-new";
-        estimatedValueUSD = preferredCondition.weightedMean ?? 0;
-        source = `market:${conditionLabel}`;
-      } else {
-        // No "New" or "Like New" data - find best weightedMean across all conditions
-        let bestValue = 0;
-
-        for (const stat of game.calc) {
-          const weighted = stat.weightedMean ?? 0;
-          if (weighted > bestValue) {
-            bestValue = weighted;
-          }
+        // Source indicates if we got exact match or fallback
+        if (match.matchedCondition === gameCondition) {
+          source = `market:${gameCondition.toLowerCase().replace(" ", "-")}`;
+        } else {
+          source = `market:${match.matchedCondition.toLowerCase().replace(" ", "-")}(fallback)`;
         }
-
-        estimatedValueUSD = bestValue;
-        source = "market:other";
+      } else {
+        // No calc data despite having prices (shouldn't happen)
+        estimatedValueUSD = Math.round(
+          purchasePriceUSD * NO_MARKET_DATA_FALLBACK_MULTIPLIER,
+        );
+        source = "fallback";
       }
       gamesWithPrices++;
     } else {
       // No market data available
-      // Fall back to 60% of purchase price as a conservative estimate
-      // This accounts for typical depreciation of board games
-      estimatedValueUSD = Math.round(purchasePriceUSD * 0.6);
+      // Fall back to configured percentage of purchase price
+      estimatedValueUSD = Math.round(
+        purchasePriceUSD * NO_MARKET_DATA_FALLBACK_MULTIPLIER,
+      );
       source = "fallback";
       gamesWithFallback++;
     }
@@ -211,7 +316,7 @@ export async function generateValuationCsv(
     }
 
     csvLines.push(
-      `${escapedName},${purchasePrice},${estimatedValue},${source}`,
+      `${escapedName},${purchasePrice},${estimatedValue},${usedCondition},${source}`,
     );
   }
 
@@ -223,6 +328,15 @@ export async function generateValuationCsv(
   console.log(`  Games with market data: ${gamesWithPrices}`);
   console.log(`  Games with fallback:    ${gamesWithFallback}`);
   console.log(`  Total games:            ${games.length}`);
+
+  // Report condition distribution
+  console.log(`\nCondition distribution:`);
+  for (const condition of CONDITION_PRIORITY) {
+    const count = conditionCounts[condition] || 0;
+    if (count > 0) {
+      console.log(`  ${condition}: ${count}`);
+    }
+  }
 
   // Report collection totals
   const valueDifference = totalEstimatedValue - totalPurchasePrice;

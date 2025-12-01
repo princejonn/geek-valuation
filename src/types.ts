@@ -139,29 +139,235 @@ export interface GameResult {
 
   /** Calculated statistics grouped by condition (values in USD) */
   calc: ConditionStats[];
+
+  // --- User collection data (for condition inference) ---
+
+  /**
+   * User's condition assessment from CSV (free-form text).
+   * If this matches a standard BGG condition, it will be used for valuation.
+   */
+  conditiontext?: string;
+
+  /**
+   * Number of times the user has played this game.
+   * Used to infer condition when conditiontext is not provided.
+   */
+  numplays?: number;
 }
 
 /**
  * Row from a BGG collection CSV export.
  *
- * BGG's CSV export contains many fields; we only use a subset.
- * The interface allows any string keys to accommodate the full export
- * while explicitly typing the fields we depend on.
+ * BGG's CSV export contains many fields. All values are strings as parsed
+ * from the CSV (numbers represented as strings, booleans as "0"/"1").
+ *
+ * Only `objectname` and `objectid` are guaranteed; all other fields may
+ * be empty strings or missing depending on the export configuration.
  */
 export interface CsvRow {
+  // --- Core identification (required) ---
+
   /** Game name from the collection */
   objectname: string;
 
-  /** BGG object ID */
+  /** BGG object ID (unique identifier) */
   objectid: string;
 
-  /** Price paid for the game (optional, user-entered) */
+  // --- Core identification (optional) ---
+
+  /** Collection entry ID */
+  collid?: string;
+
+  /** Object type (e.g., "thing") */
+  objecttype?: string;
+
+  /** Item type (e.g., "standalone", "expansion") */
+  itemtype?: string;
+
+  /** Original name of the game */
+  originalname?: string;
+
+  // --- User ratings and plays ---
+
+  /** User's rating (0-10, "0" if not rated) */
+  rating?: string;
+
+  /** Number of times the user has played this game */
+  numplays?: string;
+
+  // --- Collection status flags (all "0" or "1") ---
+
+  /** User owns this game */
+  own?: string;
+
+  /** User is willing to trade this game */
+  fortrade?: string;
+
+  /** User wants this game (general) */
+  want?: string;
+
+  /** User wants to buy this game */
+  wanttobuy?: string;
+
+  /** User wants to play this game */
+  wanttoplay?: string;
+
+  /** User previously owned this game */
+  prevowned?: string;
+
+  /** User has preordered this game */
+  preordered?: string;
+
+  /** Game is on user's wishlist */
+  wishlist?: string;
+
+  /** Wishlist priority (1-5, empty if not on wishlist) */
+  wishlistpriority?: string;
+
+  // --- User comments ---
+
+  /** User's wishlist comment */
+  wishlistcomment?: string;
+
+  /** User's general comment about the game */
+  comment?: string;
+
+  /**
+   * User's condition assessment of their copy.
+   * Free-form text describing the condition of the game.
+   * This is the user's own assessment, NOT the BGG marketplace condition.
+   */
+  conditiontext?: string;
+
+  /** User's private comment (not visible to others) */
+  privatecomment?: string;
+
+  // --- Parts lists ---
+
+  /** Whether the user has a parts list */
+  haspartslist?: string;
+
+  /** Whether the user wants parts */
+  wantpartslist?: string;
+
+  // --- BGG statistics ---
+
+  /** Bayesian average rating */
+  baverage?: string;
+
+  /** Average user rating */
+  average?: string;
+
+  /** Average complexity/weight rating */
+  avgweight?: string;
+
+  /** User's personal weight rating */
+  weight?: string;
+
+  /** BGG rank (overall) */
+  rank?: string;
+
+  /** Number of BGG users who own this game */
+  numowned?: string;
+
+  // --- Game metadata ---
+
+  /** Minimum number of players */
+  minplayers?: string;
+
+  /** Maximum number of players */
+  maxplayers?: string;
+
+  /** Listed playing time in minutes */
+  playingtime?: string;
+
+  /** Maximum playing time in minutes */
+  maxplaytime?: string;
+
+  /** Minimum playing time in minutes */
+  minplaytime?: string;
+
+  /** Year the game was published */
+  yearpublished?: string;
+
+  /** BGG recommended player counts (comma-separated) */
+  bggrecplayers?: string;
+
+  /** BGG best player counts (comma-separated) */
+  bggbestplayers?: string;
+
+  /** BGG recommended age range */
+  bggrecagerange?: string;
+
+  /** BGG language dependence rating */
+  bgglanguagedependence?: string;
+
+  // --- Publisher/image info ---
+
+  /** Publisher ID */
+  publisherid?: string;
+
+  /** Image ID on BGG */
+  imageid?: string;
+
+  // --- Purchase information ---
+
+  /** Price paid for the game (user-entered) */
   pricepaid?: string;
 
-  /** Currency of the price paid (optional) */
+  /** Currency of the price paid (ISO 4217 code) */
   pp_currency?: string;
 
-  /** Allow additional CSV columns */
+  /** Current value estimate (user-entered) */
+  currvalue?: string;
+
+  /** Currency of the current value */
+  cv_currency?: string;
+
+  /** Date the game was acquired (YYYY-MM-DD) */
+  acquisitiondate?: string;
+
+  /** Where the game was acquired from */
+  acquiredfrom?: string;
+
+  /** Quantity owned */
+  quantity?: string;
+
+  /** Barcode/UPC */
+  barcode?: string;
+
+  // --- Inventory tracking ---
+
+  /** Inventory location */
+  invlocation?: string;
+
+  /** Inventory date */
+  invdate?: string;
+
+  // --- Version information ---
+
+  /** Version year */
+  year?: string;
+
+  /** Version language */
+  language?: string;
+
+  /** Other version info */
+  other?: string;
+
+  /** Version publishers */
+  version_publishers?: string;
+
+  /** Version languages */
+  version_languages?: string;
+
+  /** Version year published */
+  version_yearpublished?: string;
+
+  /** Version nickname/edition name */
+  version_nickname?: string;
+
+  /** Allow additional CSV columns for forward compatibility */
   [key: string]: string | undefined;
 }
 

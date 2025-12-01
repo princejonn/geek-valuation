@@ -85,6 +85,9 @@ geek-valuation valuation --output ./my-valuation.csv
 
 # Custom currency (e.g., EUR, USD, GBP)
 geek-valuation valuation --currency EUR
+
+# Set default condition for games without explicit condition
+geek-valuation valuation --condition like-new
 ```
 
 **Options:**
@@ -92,6 +95,7 @@ geek-valuation valuation --currency EUR
 |--------|---------|-------------|
 | `-o, --output <path>` | `<cwd>/valuation.csv` | Path to output valuation CSV |
 | `-C, --currency <code>` | `SEK` | Target currency for valuation (ISO 4217 code) |
+| `-c, --condition <cond>` | (inferred) | Default condition for valuation (see [Condition System](#condition-system)) |
 
 **Output columns:**
 | Column | Description |
@@ -99,13 +103,17 @@ geek-valuation valuation --currency EUR
 | `name` | Game name |
 | `purchasePrice{CUR}` | What you paid (converted to target currency) |
 | `estimatedValue{CUR}` | Current market value estimate |
+| `condition` | The condition used for valuation (see [Condition System](#condition-system)) |
 | `source` | How the estimate was determined |
 
 **Source values:**
 
-- `market:new` - From "New" condition weighted mean (preferred)
-- `market:like-new` - From "Like New" weighted mean (if no "New" data)
-- `market:other` - From other conditions (if no "New" or "Like New" data)
+- `market:new` - From "New" condition weighted mean (exact match)
+- `market:like-new` - From "Like New" weighted mean (exact match)
+- `market:very-good` - From "Very Good" weighted mean (exact match)
+- `market:good` - From "Good" weighted mean (exact match)
+- `market:acceptable` - From "Acceptable" weighted mean (exact match)
+- `market:<condition>(fallback)` - Used different condition than requested (e.g., no "New" data, fell back to "Like New")
 - `fallback` - No market data; estimated as 60% of purchase price
 
 **Collection Summary:**
@@ -139,6 +147,9 @@ geek-valuation all --force
 
 # Custom region and currency
 geek-valuation all --region americas --currency USD
+
+# Set default condition for valuation
+geek-valuation all --condition very-good
 ```
 
 **Options:**
@@ -149,6 +160,7 @@ geek-valuation all --region americas --currency USD
 | `-f, --force` | `false` | Force re-scrape all games, ignoring cache |
 | `-r, --region <region>` | `europe` | Region for currency weighting (see below) |
 | `-C, --currency <code>` | `SEK` | Target currency for valuation (ISO 4217 code) |
+| `--condition <condition>` | (inferred) | Default condition for valuation (see [Condition System](#condition-system)) |
 
 ## File Locations
 
@@ -238,13 +250,75 @@ weightedMean = Σ(value × combinedWeight) / Σ(combinedWeight)
 
 This ensures valuations reflect your regional market conditions while still incorporating global data where relevant.
 
-### Condition Priority
+### Condition System
 
-When determining estimated value:
+The tool supports **per-game condition** for more accurate valuations. Each game's condition is determined in priority order:
 
-1. **Prioritizes "New" condition** - Sealed games command premium prices
-2. **Falls back to "Like New"** if no "New" sales exist
-3. **Falls back to other conditions** if neither "New" nor "Like New" data exists
+#### 1. `conditiontext` from CSV (Highest Priority)
+
+If your BGG collection CSV has a `conditiontext` column with a value matching a standard BGG condition (case-insensitive), that condition is used for valuation.
+
+**Valid values:** `New`, `Like New`, `Very Good`, `Good`, `Acceptable`
+
+You can add this column to your exported CSV using a spreadsheet editor (Numbers, Excel, etc.).
+
+#### 2. `--condition` CLI Flag
+
+If no `conditiontext` is set for a game, the `--condition` flag provides a global default.
+
+**Valid values (kebab-case):** `new`, `like-new`, `very-good`, `good`, `acceptable`
+
+```bash
+geek-valuation valuation --condition like-new
+geek-valuation all --condition very-good
+```
+
+#### 3. Inferred from Play Count
+
+If neither `conditiontext` nor `--condition` is set, condition is inferred from `numplays`:
+
+| Plays | Inferred Condition |
+| ----- | ------------------ |
+| 0-1   | New                |
+| 2-10  | Like New           |
+| 11-15 | Very Good          |
+| 16-25 | Good               |
+| 26+   | Acceptable         |
+
+These thresholds can be customized in `src/constants.ts` (see [Customizing Condition Thresholds](#customizing-condition-thresholds)).
+
+#### 4. Ultimate Fallback
+
+If none of the above apply, defaults to **Like New**.
+
+#### Market Data Condition Fallback
+
+Once the game's condition is determined, the tool looks for market data matching that condition. If no exact match exists, it falls back through the condition priority order:
+
+1. New (highest value)
+2. Like New
+3. Very Good
+4. Good
+5. Acceptable (lowest value)
+
+The `source` column in the output CSV indicates whether an exact match was found or a fallback was used (e.g., `market:like-new(fallback)`).
+
+#### Customizing Condition Thresholds
+
+Edit `src/constants.ts` to customize the condition inference thresholds:
+
+```typescript
+export const CONDITION_PLAY_THRESHOLDS = {
+  NEW_MAX_PLAYS: 1, // 0-1 plays = New
+  LIKE_NEW_MAX_PLAYS: 10, // 2-10 plays = Like New
+  VERY_GOOD_MAX_PLAYS: 15, // 11-15 plays = Very Good
+  GOOD_MAX_PLAYS: 25, // 16-25 plays = Good
+  // 26+ plays = Acceptable
+};
+
+// Default condition when nothing else applies
+export const DEFAULT_CONDITION = Condition.LIKE_NEW;
+```
 
 ### No Market Data
 
@@ -395,6 +469,7 @@ npm run update
 geek-valuation/
 ├── src/
 │   ├── main.ts        # CLI entry point (Commander)
+│   ├── constants.ts   # Configurable thresholds and enums
 │   ├── csv.ts         # CSV parsing
 │   ├── currency.ts    # Price parsing & exchange rates
 │   ├── scraper.ts     # Puppeteer web scraping

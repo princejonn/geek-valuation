@@ -26,6 +26,7 @@
  * ```bash
  * npx ts-node src/main.ts valuation
  * npx ts-node src/main.ts valuation --output ./my-valuation.csv
+ * npx ts-node src/main.ts valuation --condition like-new  # Set default condition
  * ```
  *
  * ### Do both (scrape + valuation)
@@ -33,7 +34,21 @@
  * ```bash
  * npx ts-node src/main.ts all
  * npx ts-node src/main.ts all --force  # Re-scrape all, ignore cache
+ * npx ts-node src/main.ts all --condition very-good  # Set default condition
  * ```
+ *
+ * ## Condition System
+ *
+ * The valuation uses per-game conditions determined in priority order:
+ *
+ * 1. **conditiontext from CSV** - If it matches a standard BGG condition
+ *    (case-insensitive: "New", "Like New", "Very Good", "Good", "Acceptable")
+ * 2. **--condition flag** - Global fallback condition from CLI (kebab-case:
+ *    new, like-new, very-good, good, acceptable)
+ * 3. **numplays inference** - Inferred from play count (0 plays = New, etc.)
+ * 4. **Default** - Falls back to "Like New" if nothing else works
+ *
+ * See `src/constants.ts` for configurable thresholds.
  *
  * ## File Locations
  *
@@ -60,11 +75,28 @@
 
 import { Command } from "commander";
 import * as path from "path";
+import { Condition, CONDITION_CLI_MAP, VALID_CONDITIONS } from "./constants";
 import { parseCsv } from "./csv";
 import { loadExchangeRates } from "./currency";
 import { scrape } from "./scraper";
 import { DEFAULT_REGION, Region } from "./stats";
 import { generateValuationCsv } from "./valuation";
+
+/**
+ * Parses and validates a condition CLI argument.
+ * @param value - The CLI value (kebab-case)
+ * @returns The Condition enum value
+ * @throws Error if invalid condition
+ */
+function parseConditionArg(value: string): Condition {
+  const condition = CONDITION_CLI_MAP[value.toLowerCase()];
+  if (!condition) {
+    throw new Error(
+      `Invalid condition: "${value}". Valid options: ${VALID_CONDITIONS.join(", ")}`,
+    );
+  }
+  return condition;
+}
 
 /**
  * Default directory for data files (prices, exchange rates).
@@ -167,19 +199,32 @@ program
     "Target currency for valuation (ISO 4217 code)",
     "SEK",
   )
-  .action(async (options: { output: string; currency: string }) => {
-    try {
-      await generateValuationCsv({
-        input: path.join(DATA_DIR, "prices.json"),
-        output: resolvePath(options.output),
-        ratesPath: path.join(DATA_DIR, "exchange-rates.json"),
-        targetCurrency: options.currency,
-      });
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .option(
+    "-c, --condition <condition>",
+    `Default condition for valuation (${VALID_CONDITIONS.join(", ")})`,
+  )
+  .action(
+    async (options: {
+      output: string;
+      currency: string;
+      condition?: string;
+    }) => {
+      try {
+        await generateValuationCsv({
+          input: path.join(DATA_DIR, "prices.json"),
+          output: resolvePath(options.output),
+          ratesPath: path.join(DATA_DIR, "exchange-rates.json"),
+          targetCurrency: options.currency,
+          defaultCondition: options.condition
+            ? parseConditionArg(options.condition)
+            : undefined,
+        });
+      } catch (error) {
+        console.error(error);
+        process.exit(1);
+      }
+    },
+  );
 
 // ----------------------------------------------------------------------------
 // All Command (Scrape + Valuation)
@@ -209,6 +254,10 @@ program
     "Target currency for valuation (ISO 4217 code)",
     "SEK",
   )
+  .option(
+    "--condition <condition>",
+    `Default condition for valuation (${VALID_CONDITIONS.join(", ")})`,
+  )
   .action(
     async (options: {
       collection: string;
@@ -216,6 +265,7 @@ program
       force?: boolean;
       region: string;
       currency: string;
+      condition?: string;
     }) => {
       try {
         const pricesPath = path.join(DATA_DIR, "prices.json");
@@ -240,6 +290,9 @@ program
           output: resolvePath(options.output),
           ratesPath,
           targetCurrency: options.currency,
+          defaultCondition: options.condition
+            ? parseConditionArg(options.condition)
+            : undefined,
         });
       } catch (error) {
         console.error(error);

@@ -335,6 +335,8 @@ export async function scrapeGame(
         purchasePrice: getPurchasePrice(row, rates),
         prices,
         calc: [], // Stats calculated after scraping
+        conditiontext: row.conditiontext || undefined,
+        numplays: row.numplays ? parseInt(row.numplays, 10) : undefined,
       };
     } catch (error) {
       lastError = error as Error;
@@ -498,9 +500,11 @@ export async function scrape(
           `[${progress}] ⊘ Cached: ${row.objectname} (${row.objectid})`,
         );
 
-        // Update cached item with fresh purchase price and recalculate stats
+        // Update cached item with fresh data from CSV and recalculate stats
         // (in case exchange rates changed or CSV was updated)
         cached.purchasePrice = getPurchasePrice(row, exchangeRates);
+        cached.conditiontext = row.conditiontext || undefined;
+        cached.numplays = row.numplays ? parseInt(row.numplays, 10) : undefined;
         cached.calc = calculateStats(cached.prices, exchangeRates, region);
 
         results.push(cached);
